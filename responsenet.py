@@ -68,7 +68,7 @@ def construct_digraph(edges_file, default_capacity= 1):
             w = float(tokens[2])
             if w <= 1.0 and w >= 0.0:
                 weights.append(w)
-                if w == 1.0 or 1:
+                if w == 1.0 or w == 1:
                     all_ones += 1
             else:
                 raise(ValueError)
@@ -83,8 +83,9 @@ def construct_digraph(edges_file, default_capacity= 1):
                         node2,
                         cost = w,
                         cap = default_capacity)
-
-        assert(all_ones < len(weights), "All weights are 1")
+        
+        if all_ones == len(weights):
+            raise(ValueError)
 
         idDict["maxID"] = curID
         return G, idDict
@@ -123,7 +124,7 @@ def add_sources_and_targets(G, sources, targets, idDict):
 
     for source in sources:
         print(source)
-        if source in idDict:
+        if source in G:
             print("source found")
             # Commenting out to also prepare for loss of idDict
             # G.add_edge(idDict["source"], 
@@ -216,11 +217,15 @@ def prepare_constraints(solver, G, idDict):
         in_edges = list(G.in_edges(node))
         out_edges = list(G.out_edges(node))
         
-        if G.node[ident] == idDict["source"] or G.node[ident] == idDict["target"]:
-            continue
+        if G.nodes[node]["ident"] == idDict["source"] or G.nodes[node]["ident"] == idDict["target"]:
+            continue   
         
-        constraints.append(solver.Constraint(node,solver.infinity()))
-        
+        # Trying out a new way of marking constraints, while also wrapping the data into the G object
+        # curr_constraint = solver.Constraint(idDict[node],solver.infinity())
+        curr_constraint = solver.Constraint(0.0, solver.infinity())
+        constraints.append(curr_constraint)
+        G.nodes[node]["constraint"] = curr_constraint
+
         for u,v in in_edges:
             assert v == node
             constraints[i].SetCoefficient(G[u][v]["flow"],1)
@@ -233,8 +238,11 @@ def prepare_constraints(solver, G, idDict):
 
 
     # Modified for depreciation of idDict
-    constraints.append(solver.Constraint(G.node["S"], solver.infinity()))
+    # constraints.append(solver.Constraint(idDict["source"], solver.infinity()))
     
+    # trying something silly
+    constraints.append(solver.Constraint(0.0, solver.infinity()))
+
     for j,k in list(G.out_edges("S")):
         constraints[-1].SetCoefficient(G[j][k]["flow"],1)
     for j,k in list(G.in_edges("T")):
