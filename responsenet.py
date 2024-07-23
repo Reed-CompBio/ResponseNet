@@ -68,7 +68,7 @@ def construct_digraph(edges_file, default_capacity= 1):
             w = float(tokens[2])
             if w <= 1.0 and w >= 0.0:
                 weights.append(w)
-                if w == 1.0 or w == 1:
+                if w == 1.0:
                     all_ones += 1
             else:
                 raise(ValueError)
@@ -84,6 +84,7 @@ def construct_digraph(edges_file, default_capacity= 1):
                         cost = w,
                         cap = default_capacity)
         
+        # Will throw error if all weights are equal to 1 or 1.0
         if all_ones == len(weights):
             raise(ValueError)
 
@@ -221,8 +222,8 @@ def prepare_constraints(solver, G, idDict):
             continue   
         
         # Trying out a new way of marking constraints, while also wrapping the data into the G object
-        # curr_constraint = solver.Constraint(idDict[node],solver.infinity())
-        curr_constraint = solver.Constraint(0.0, solver.infinity())
+        curr_constraint = solver.Constraint(idDict[node],solver.infinity())
+        #curr_constraint = solver.Constraint(0.0, solver.infinity())
         constraints.append(curr_constraint)
         G.nodes[node]["constraint"] = curr_constraint
 
@@ -238,10 +239,10 @@ def prepare_constraints(solver, G, idDict):
 
 
     # Modified for depreciation of idDict
-    # constraints.append(solver.Constraint(idDict["source"], solver.infinity()))
+    constraints.append(solver.Constraint(idDict["source"], solver.infinity()))
     
     # trying something silly
-    constraints.append(solver.Constraint(0.0, solver.infinity()))
+    # constraints.append(solver.Constraint(, solver.infinity()))
 
     for j,k in list(G.out_edges("S")):
         constraints[-1].SetCoefficient(G[j][k]["flow"],1)
