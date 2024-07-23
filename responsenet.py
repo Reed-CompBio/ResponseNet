@@ -40,6 +40,9 @@ def construct_digraph(edges_file, default_capacity= 1):
     G = nx.DiGraph()
     idDict = dict()
     curID = 0
+
+    weights = []
+    all_ones = 0
     
     # Go through edge_file, assign each node an id
     with open(edges_file) as edges_f:
@@ -48,23 +51,41 @@ def construct_digraph(edges_file, default_capacity= 1):
             node1 = tokens[0]
             
             # Add nodes to idDict if they aren't there
+            # NOTE: This is an artifact of MCF, idDict functionality may be modified or removed
             if not node1 in idDict:
                 idDict[node1] = curID
                 curID += 1
+                G.add_node(node1, ident = curID)
             node2 = tokens[1]
             if not node2 in idDict:
                 idDict[node2] = curID
                 curID += 1
+                G.add_node(node2, ident = curID)
            
         # TODO: Add check for all weights to be between 0,1
         #       Do an error if all weights are 1
+        #       NOTE: Check *should* be done, will test later
             w = float(tokens[2])
+            if w <= 1.0 and w >= 0.0:
+                weights.append(w)
+                if w == 1.0 or 1:
+                    all_ones += 1
+            else:
+                raise(ValueError)
             
-            G.add_edge(idDict[node1], 
-                       idDict[node2], 
-                       cost = w, 
-                       cap = default_capacity)
-            
+            # NOTE: Commenting out as part of idDict depreciation, will remove later
+            # G.add_edge(idDict[node1], 
+            #            idDict[node2], 
+            #            cost = w, 
+            #            cap = default_capacity)
+
+            G.add_edge(node1,
+                        node2,
+                        cost = w,
+                        cap = default_capacity)
+
+        assert(all_ones < len(weights), "All weights are 1")
+
         idDict["maxID"] = curID
         return G, idDict
     
@@ -93,35 +114,48 @@ def add_sources_and_targets(G, sources, targets, idDict):
     source_cap = source_weight
     target_cap = target_weight
     
-    # subsets capturing the source and target nodes
-    gen = []
-    tra = []
-    
     curID = idDict["maxID"]
     idDict["source"] = curID
+    G.add_node("S", ident = curID)
     curID += 1
     idDict["target"] = curID
+    G.add_node("T", ident = curID)
 
     for source in sources:
         print(source)
         if source in idDict:
-            print("found")
-            G.add_edge(idDict["source"], 
-                       idDict[source], 
-                       cost = source_weight, 
-                       cap = source_cap)
+            print("source found")
+            # Commenting out to also prepare for loss of idDict
+            # G.add_edge(idDict["source"], 
+            #            idDict[source], 
+            #            cost = source_weight, 
+            #            cap = source_cap)
             
-            gen.append(idDict[source])
+            G.add_edge("S",
+                        source,
+                        cost = source_weight,
+                        cap = source_cap)
+
+        else:
+            print(f"Source: {source} not found in graph")
 
     for target in targets:
         print(target)
         if target in idDict:
-            G.add_edge(idDict[target], 
-                       idDict["target"], 
-                       cost = target_weight, 
-                       cap = target_cap)
-            
-            tra.append(idDict[target])
+            print("target found")
+            # See above comment
+            # G.add_edge(idDict[target], 
+            #            idDict["target"], 
+            #            cost = target_weight, 
+            #            cap = target_cap)
+           
+            G.add_edge(target,
+                        "T",
+                        cost = target_weight,
+                        cap = target_cap)
+
+        else:
+            print(f"Target: {target} not found in graph")   
             
     return G
     
@@ -182,7 +216,7 @@ def prepare_constraints(solver, G, idDict):
         in_edges = list(G.in_edges(node))
         out_edges = list(G.out_edges(node))
         
-        if node == idDict["source"] or node == idDict["target"]:
+        if G.node[ident] == idDict["source"] or G.node[ident] == idDict["target"]:
             continue
         
         constraints.append(solver.Constraint(node,solver.infinity()))
@@ -196,12 +230,14 @@ def prepare_constraints(solver, G, idDict):
             constraints[i].SetCoefficient(G[u][v]["flow"],-1)
             
         constraints[i].SetBounds(0,0)
+
+
+    # Modified for depreciation of idDict
+    constraints.append(solver.Constraint(G.node["S"], solver.infinity()))
     
-    constraints.append(solver.Constraint(idDict["source"], solver.infinity()))
-    
-    for j,k in list(G.out_edges(idDict["source"])):
+    for j,k in list(G.out_edges("S")):
         constraints[-1].SetCoefficient(G[j][k]["flow"],1)
-    for j,k in list(G.in_edges(idDict["target"])):
+    for j,k in list(G.in_edges("T")):
         constraints[-1].SetCoefficient(G[j][k]["flow"],-1)
         
     constraints[-1].SetBounds(0,0)
@@ -310,7 +346,7 @@ def write_output_to_tsv(status, G, solver, out_file, include_st = False):
         for u,v in G.edges:    
             if G[u][v]["flow"].solution_value() > 0.0:   
                 print(G[u][v]["flow"],'-->',G[u][v]["flow"].solution_value())
-                output_f.write(str(u)+"\t"+str(v)+"\t"+str(G[u][v]["flow"].solution_value()))
+                output_f.write(str(u)+"\t"+str(v)+"\t"+str(G[u][v]["flow"].solution_value())+"\n")
     return
 
 def main(args):
