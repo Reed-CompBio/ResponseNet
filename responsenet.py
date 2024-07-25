@@ -331,9 +331,7 @@ def write_output_to_tsv(status, G, solver, out_file):
             out_l.write("Objective value = " + str(solver.Objective().Value()) +'\n')
             out_l.write("Solved in " + str(float(solver.wall_time())/1000) + " seconds"+'\n\n')
             out_l.write("Solver:\n")
-            out_l.write('**'*25 + "\n")
             out_l.write(str(solver.ExportModelAsLpFormat(False).replace('\\', '').replace(',_', ',')))
-            out_l.write('**'*25 + "\n")
 
         
         for u,v in G.edges:    
@@ -351,8 +349,10 @@ def main(args):
     
     global _verbose 
     global _include_st 
+    global _output_log
     _verbose = args.verbose
     _include_st = args.include_st
+    _output_log = args.output_log
 
     gamma = args.gamma
     
