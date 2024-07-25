@@ -354,7 +354,7 @@ def write_output_to_tsv(status, G, solver, out_file, include_st = False):
         
         for u,v in G.edges:    
             if G[u][v]["flow"].solution_value() > 0.0:   
-                print(G[u][v]["flow"],'-->',G[u][v]["flow"].solution_value())
+                #print(G[u][v]["flow"],'-->',G[u][v]["flow"].solution_value())
                 output_f.write(str(u)+"\t"+str(v)+"\t"+str(G[u][v]["flow"].solution_value())+"\n")
     return
 
