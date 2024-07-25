@@ -66,10 +66,12 @@ def construct_digraph(edges_file, default_capacity= 1):
         #       Do an error if all weights are 1
         #       NOTE: Check *should* be done, will test later
             w = float(tokens[2])
+            # TODO: Add comment why we truncate 1.0 to 0.7
             if w <= 1.0 and w > 0.0:
+                if w > 0.7:
+                    w = 0.7
                 weights.append(w)
-                if w == 1.0:
-                    all_ones += 1
+            
             else:
                 raise(ValueError)
             
@@ -83,10 +85,6 @@ def construct_digraph(edges_file, default_capacity= 1):
                         node2,
                         cost = w,
                         cap = default_capacity)
-        
-        # Will throw error if all weights are equal to 1 or 1.0
-        if all_ones == len(weights):
-            raise(ValueError)
 
         idDict["maxID"] = curID
         return G, idDict
@@ -143,7 +141,7 @@ def add_sources_and_targets(G, sources, targets, idDict):
 
     for target in targets:
         print(target)
-        if target in idDict:
+        if target in G:
             print("target found")
             # See above comment
             # G.add_edge(idDict[target], 
@@ -219,16 +217,13 @@ def prepare_constraints(solver, G, idDict):
         in_edges = list(G.in_edges(node))
         out_edges = list(G.out_edges(node))
         
-        if G.nodes[node]["ident"] == idDict["source"] or G.nodes[node]["ident"] == idDict["target"]:
+        if node == "source" or node == "target":
             continue   
         
-        # 
-        assert(i == idDict[node])
-
         # Trying out a new way of marking constraints, while also wrapping the data into the G object
         #curr_constraint = solver.Constraint(idDict[node],solver.infinity())
         # Trying to figure out if line 228 and line 230 make any differences
-        curr_constraint = solver.Constraint(i, solver.infinity())
+        curr_constraint = solver.Constraint(0.0, 0.0, node)
         
         constraints.append(curr_constraint)
         G.nodes[node]["constraint"] = curr_constraint
@@ -241,11 +236,11 @@ def prepare_constraints(solver, G, idDict):
             assert u == node
             constraints[i].SetCoefficient(G[u][v]["flow"],-1)
             
-        constraints[i].SetBounds(0,0)
+        #constraints[i].SetBounds(0,0)
 
 
     # Modified for depreciation of idDict
-    constraints.append(solver.Constraint(idDict["source"], solver.infinity()))
+    constraints.append(solver.Constraint(0.0, 0.0, "source"))
 
     # Testing if we should 
     
@@ -257,12 +252,12 @@ def prepare_constraints(solver, G, idDict):
     for j,k in list(G.in_edges("target")):
         constraints[-1].SetCoefficient(G[j][k]["flow"],-1)
         
-    constraints[-1].SetBounds(0,0)
+    #constraints[-1].SetBounds(0,0)
 
     # Helpful debugging statement for LP    
-    # print('**'*25)
-    # print(solver.ExportModelAsLpFormat(False).replace('\\', '').replace(',_', ','), sep='\n')
-    # print('**'*25)
+    print('**'*25)
+    print(solver.ExportModelAsLpFormat(False).replace('\\', '').replace(',_', ','), sep='\n')
+    print('**'*25)
     
     return constraints
             
@@ -362,7 +357,7 @@ def write_output_to_tsv(status, G, solver, out_file, include_st = False):
         print(f"Objective value = {solver.Objective().Value():0.1f}")
         
         for u,v in G.edges:    
-            if G[u][v]["flow"].solution_value() > 0.0 and G[u][v]["flow"].solution_value() < 1.0:   
+            if G[u][v]["flow"].solution_value() > 0.0 and G[u][v]["flow"].solution_value() <= 1.0:   
                 #print(G[u][v]["flow"],'-->',G[u][v]["flow"].solution_value())
                 output_f.write(str(u)+"\t"+str(v)+"\t"+str(G[u][v]["flow"].solution_value())+"\n")
     return
@@ -403,9 +398,9 @@ if __name__ == "__main__":
                         type=str,
                         required=True)
     parser.add_argument('--gamma',
-                        help='The size of the output graph',
+                        help='The size of the output graph. Default = 10',
                         type=int,
-                        required=True,
+                        required=False,
                         default=10)
 
     args = parser.parse_args()
