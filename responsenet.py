@@ -4,6 +4,12 @@ from ortools.linear_solver import pywraplp
 import argparse
 import networkx as nx
 import math
+import warnings
+
+# Global Variables that args can modify
+_verbose = False
+_include_st = False
+_output_log = False
 
 def parse_nodes(node_file):
     """ 
@@ -38,8 +44,6 @@ def construct_digraph(edges_file, default_capacity= 1):
     
     #G = min_cost_flow.SimpleMinCostFlow()
     G = nx.DiGraph()
-    idDict = dict()
-    curID = 0
     
     # Go through edge_file, assign each node an id
     with open(edges_file) as edges_f:
@@ -47,28 +51,30 @@ def construct_digraph(edges_file, default_capacity= 1):
             tokens = line.strip().split()
             node1 = tokens[0]
             
-            # Add nodes to idDict if they aren't there
-            if not node1 in idDict:
-                idDict[node1] = curID
-                curID += 1
+            if not node1 in G:
+                G.add_node(node1)
             node2 = tokens[1]
-            if not node2 in idDict:
-                idDict[node2] = curID
-                curID += 1
+            if not node2 in G:
+                G.add_node(node2)
            
-        # TODO: Add check for all weights to be between 0,1
-        #       Do an error if all weights are 1
+            # Do an error if all weights are 1
             w = float(tokens[2])
+            # TODO: Add comment why we truncate 1.0 to 0.7
+            if w <= 1.0 and w > 0.0:
+                if w > 0.7:
+                    w = 0.7
             
-            G.add_edge(idDict[node1], 
-                       idDict[node2], 
-                       cost = w, 
-                       cap = default_capacity)
-            
-        idDict["maxID"] = curID
-        return G, idDict
+            else:
+                warnings.warn(f"Edge {tokens[0]} --> {tokens[1]} has weight greater than 1.0, this will cause problems")
+
+            G.add_edge(node1,
+                        node2,
+                        cost = w,
+                        cap = default_capacity)
+
+        return G
     
-def add_sources_and_targets(G, sources, targets, idDict):
+def add_sources_and_targets(G, sources, targets):
     """
     Add a false source and target node to the DiGraph, helpful
     for organization and essential to the ILP
@@ -80,10 +86,7 @@ def add_sources_and_targets(G, sources, targets, idDict):
             set of all source nodes
         @targets : set()
             set of all target nodes
-        @idDict : dict()
-            dictionary that assigns integer values to each node
-            to uniquely identify each node
-
+        
     Returns:
         @G : modified DiGraph object with faux source and target
     """
@@ -93,39 +96,43 @@ def add_sources_and_targets(G, sources, targets, idDict):
     source_cap = source_weight
     target_cap = target_weight
     
-    # subsets capturing the source and target nodes
-    gen = []
-    tra = []
-    
-    curID = idDict["maxID"]
-    idDict["source"] = curID
-    curID += 1
-    idDict["target"] = curID
+    G.add_node("source")
+    G.add_node("target")
 
     for source in sources:
-        print(source)
-        if source in idDict:
-            print("found")
-            G.add_edge(idDict["source"], 
-                       idDict[source], 
-                       cost = source_weight, 
-                       cap = source_cap)
-            
-            gen.append(idDict[source])
+        if _verbose:
+            print(source)
+        if source in G:
+            if _verbose:
+                print("source found")
+            G.add_edge("source",
+                        source,
+                        cost = source_weight,
+                        cap = source_cap)
+
+        else:
+            if _verbose:
+                print(f"Source: {source} not found in graph")
 
     for target in targets:
-        print(target)
-        if target in idDict:
-            G.add_edge(idDict[target], 
-                       idDict["target"], 
-                       cost = target_weight, 
-                       cap = target_cap)
-            
-            tra.append(idDict[target])
+        
+        if _verbose:
+            print(target)
+        if target in G:
+            if _verbose:
+                print("target found")
+            G.add_edge(target,
+                        "target",
+                        cost = target_weight,
+                        cap = target_cap)
+
+        else:
+            if _verbose:
+                print(f"Target: {target} not found in graph")   
             
     return G
     
-def prepare_variables(solver, G, default_capacity= 1):
+def prepare_variables(solver, G):
     """
     This section systematically creates variables for the ILP and saves them
     both in a dictionary and as an attribute for each edge in G
@@ -135,23 +142,26 @@ def prepare_variables(solver, G, default_capacity= 1):
             solver object that the LP depends on
         @G : nx.DiGraph()
             graph object of interactome
-        @default_capacity : int()
-            capacity value, defaulted to 1. Can be overwritten.
-
+        
     Returns:
         @flows: dictionary of all variables in the solver
     """
     flows = dict()
     extras = 0
-    for edge in G.edges():
+    for i,j in G.edges():
+        edge = (i,j)
         if edge not in flows:
-            flows[edge] = solver.NumVar(0.0, default_capacity, f"Flows{edge}")
+            # Need to set max value for each edge to be the max capacity of given edge
+            # Seeing how this changes things (it does)
+            flows[edge] = solver.NumVar(0.0, G[i][j]["cap"], f"Flows{edge}")
             G.get_edge_data(edge[0],edge[1])["flow"] = flows[edge]
         else:
-            print("repeat")
-            print(edge)
+            if _verbose:
+                print("repeat")
+                print(edge)
             extras += 1
-    print(f"We had {extras} repeat edges")
+    if _verbose:
+        print(f"We had {extras} repeat edges")
 
     # Helpful debugging statement for LP solver    
     # print('**'*25)
@@ -160,7 +170,7 @@ def prepare_variables(solver, G, default_capacity= 1):
     
     return flows
     
-def prepare_constraints(solver, G, idDict):
+def prepare_constraints(solver, G):
     """
     This section systematically applies constraints on each node and all edges
     to make sure that any flow entering a node also exits a node
@@ -182,11 +192,16 @@ def prepare_constraints(solver, G, idDict):
         in_edges = list(G.in_edges(node))
         out_edges = list(G.out_edges(node))
         
-        if node == idDict["source"] or node == idDict["target"]:
-            continue
+        if node == "source" or node == "target":
+            continue   
         
-        constraints.append(solver.Constraint(node,solver.infinity()))
+        # Creating constraint for each node, constraint has bounds 0,0 
+        # and is named after the node
+        curr_constraint = solver.Constraint(0.0, 0.0, node)
         
+        constraints.append(curr_constraint)
+        G.nodes[node]["constraint"] = curr_constraint
+
         for u,v in in_edges:
             assert v == node
             constraints[i].SetCoefficient(G[u][v]["flow"],1)
@@ -194,18 +209,16 @@ def prepare_constraints(solver, G, idDict):
         for u,v in out_edges:
             assert u == node
             constraints[i].SetCoefficient(G[u][v]["flow"],-1)
-            
-        constraints[i].SetBounds(0,0)
-    
-    constraints.append(solver.Constraint(idDict["source"], solver.infinity()))
-    
-    for j,k in list(G.out_edges(idDict["source"])):
+
+    # Adding a final constraint to make sure all flows going from the source
+    # and to the target are equivalent
+    constraints.append(solver.Constraint(0.0, 0.0, "source"))
+
+    for j,k in list(G.out_edges("source")):
         constraints[-1].SetCoefficient(G[j][k]["flow"],1)
-    for j,k in list(G.in_edges(idDict["target"])):
+    for j,k in list(G.in_edges("target")):
         constraints[-1].SetCoefficient(G[j][k]["flow"],-1)
         
-    constraints[-1].SetBounds(0,0)
-
     # Helpful debugging statement for LP    
     # print('**'*25)
     # print(solver.ExportModelAsLpFormat(False).replace('\\', '').replace(',_', ','), sep='\n')
@@ -213,7 +226,7 @@ def prepare_constraints(solver, G, idDict):
     
     return constraints
             
-def prepare_objective(solver, G, flows, gamma, s):
+def prepare_objective(solver, G, flows, gamma):
     """
     This segment goes through all edges in the graph and sets a coefficient on each variable in the LP
 
@@ -226,8 +239,6 @@ def prepare_objective(solver, G, flows, gamma, s):
             dictionary of all flow variables for the solver
         @gamma : int()
             user defined value that determines graph size
-        @s : int()
-            integer stand-in for the "source" node
     
     Returns:
         @objective : solver objective with all constraints
@@ -238,29 +249,29 @@ def prepare_objective(solver, G, flows, gamma, s):
         
         log_weight = (math.log(G[i][j]["cost"])) * (-1)
         
-        if i == s:
+        if i == "source":
             log_weight = log_weight - gamma  
-            print("adjusting for source")
+            if _verbose:
+                print("adjusting for source")
         objective.SetCoefficient(flows[i,j], log_weight) 
     
     objective.SetMinimization()
-    
-    return objective  
-    
+        
     # Helpful debugging statement to show status of LP solver
     # print('**'*25)
     # print(solver.ExportModelAsLpFormat(False).replace('\\', '').replace(',_', ','), sep='\n')
     # print('**'*25)
 
-def responsenet(G, idDict, gamma, out_file):
+    return objective  
+
+
+def responsenet(G, gamma, out_file):
     """ 
     The NEW ILP solver for ResponseNet, using GLOP.
 
     Parameters:
         @G : nx.DiGraph()
             graph object of interactome
-        @idDict : dict()
-            dictionary of all nodes in network
         @gamma : int()
             user defined integer determining size of output graph
         @out_file : PATH()
@@ -274,18 +285,18 @@ def responsenet(G, idDict, gamma, out_file):
     if not solver:
         return
     
-    s = idDict["source"]
+    s = "source"
     
     # Data structures that define the ILP, kept for your debugging pleasure
     flows = prepare_variables(solver, G)
-    constraints = prepare_constraints(solver, G, idDict)
-    objective = prepare_objective(solver, G, flows, gamma, s)
+    constraints = prepare_constraints(solver, G)
+    objective = prepare_objective(solver, G, flows, gamma)
     
-    print("Attempting solve of flows")
+    print("Attempting solve of flows...")
     status = solver.Solve()
     
     if status == pywraplp.Solver.OPTIMAL:
-        print("Solved!")
+        print("Solved! \n")
 
     else:
         print("The problem does not have an optimal solution.")
@@ -293,19 +304,37 @@ def responsenet(G, idDict, gamma, out_file):
     
     write_output_to_tsv(status, G, solver, out_file)
     
-def write_output_to_tsv(status, G, solver, out_file, include_st = False):
+def write_output_to_tsv(status, G, solver, out_file):
     '''
     Write output of solver.Solve() over graph obj to an output file specified 
     by out_file
     
     Params:
         @status: status of solver.Solve()
-
-    # TODO: add check for if include_st == True/False
-    # TODO: Confirm if SIF is preferred output type
     '''
     with open(out_file, "w") as output_f:
         print(f"Objective value = {solver.Objective().Value():0.1f}")
+        print(f"Solved in {(float(solver.wall_time())/1000)} seconds")
+        for u,v in G.edges:
+
+            # Check to see if we want to actually include the artificial source and target  
+            if (u == "source" or v == "target") and not _include_st:
+                continue
+            else:
+                if G[u][v]["flow"].solution_value() > 0.0 and G[u][v]["flow"].solution_value() <= 1.0:   
+                    output_f.write(str(u)+"\t"+str(v)+"\t"+str(G[u][v]["flow"].solution_value())+"\n")
+
+    # Format for output log, including the entire solver information    
+    out_log = "output/logs" + out_file[6:-4] + ".log"
+    if _output_log:
+        with open(out_log, "w") as out_l:
+            out_l.write("Objective value = " + str(solver.Objective().Value()) +'\n')
+            out_l.write("Solved in " + str(float(solver.wall_time())/1000) + " seconds"+'\n\n')
+            out_l.write("Solver:\n")
+            out_l.write('**'*25 + "\n")
+            out_l.write(str(solver.ExportModelAsLpFormat(False).replace('\\', '').replace(',_', ',')))
+            out_l.write('**'*25 + "\n")
+
         
         for u,v in G.edges:    
             if G[u][v]["flow"].solution_value() > 0.0:   
@@ -315,18 +344,25 @@ def write_output_to_tsv(status, G, solver, out_file, include_st = False):
 
 def main(args):
     
+    print("Running ResponseNet...")
+
     sources = parse_nodes(args.sources_file)
     targets = parse_nodes(args.targets_file)
     
+    global _verbose 
+    global _include_st 
+    _verbose = args.verbose
+    _include_st = args.include_st
+
     gamma = args.gamma
     
-    G, idDict = construct_digraph(args.edges_file)
+    G = construct_digraph(args.edges_file)
     
-    G = add_sources_and_targets(G, sources, targets, idDict)
+    G = add_sources_and_targets(G, sources, targets)
     
     out_file = args.output+"_gamma"+str(gamma)+".tsv"
 
-    responsenet(G, idDict, gamma, out_file)
+    responsenet(G, gamma, out_file)
     
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -349,10 +385,19 @@ if __name__ == "__main__":
                         type=str,
                         required=True)
     parser.add_argument('--gamma',
-                        help='The size of the output graph',
+                        help='The size of the output graph. Default = 10',
                         type=int,
-                        required=True,
+                        required=False,
                         default=10)
+    parser.add_argument('-st','--include_st',
+                        help='Determines whether output should include artificial Source and Target nodes',
+                        action='store_true')
+    parser.add_argument('-v','--verbose',
+                        help='Include verbose console output',
+                        action='store_true')
+    parser.add_argument('-o', '--output_log',
+                        help='Create output log',
+                        action='store_true')
 
     args = parser.parse_args()
 main(args)
