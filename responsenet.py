@@ -118,10 +118,10 @@ def add_sources_and_targets(G, sources, targets, idDict):
     
     curID = idDict["maxID"]
     idDict["source"] = curID
-    G.add_node("S", ident = curID)
+    G.add_node("source", ident = curID)
     curID += 1
     idDict["target"] = curID
-    G.add_node("T", ident = curID)
+    G.add_node("target", ident = curID)
 
     for source in sources:
         print(source)
@@ -133,7 +133,7 @@ def add_sources_and_targets(G, sources, targets, idDict):
             #            cost = source_weight, 
             #            cap = source_cap)
             
-            G.add_edge("S",
+            G.add_edge("source",
                         source,
                         cost = source_weight,
                         cap = source_cap)
@@ -152,7 +152,7 @@ def add_sources_and_targets(G, sources, targets, idDict):
             #            cap = target_cap)
            
             G.add_edge(target,
-                        "T",
+                        "target",
                         cost = target_weight,
                         cap = target_cap)
 
@@ -161,7 +161,7 @@ def add_sources_and_targets(G, sources, targets, idDict):
             
     return G
     
-def prepare_variables(solver, G, default_capacity= 1):
+def prepare_variables(solver, G):
     """
     This section systematically creates variables for the ILP and saves them
     both in a dictionary and as an attribute for each edge in G
@@ -171,17 +171,18 @@ def prepare_variables(solver, G, default_capacity= 1):
             solver object that the LP depends on
         @G : nx.DiGraph()
             graph object of interactome
-        @default_capacity : int()
-            capacity value, defaulted to 1. Can be overwritten.
-
+        
     Returns:
         @flows: dictionary of all variables in the solver
     """
     flows = dict()
     extras = 0
-    for edge in G.edges():
+    for i,j in G.edges():
+        edge = (i,j)
         if edge not in flows:
-            flows[edge] = solver.NumVar(0.0, default_capacity, f"Flows{edge}")
+            # Need to set max value for each edge to be the max capacity of given edge
+            # Seeing how this changes things (it does)
+            flows[edge] = solver.NumVar(0.0, G[i][j]["cap"], f"Flows{edge}")
             G.get_edge_data(edge[0],edge[1])["flow"] = flows[edge]
         else:
             print("repeat")
@@ -221,11 +222,14 @@ def prepare_constraints(solver, G, idDict):
         if G.nodes[node]["ident"] == idDict["source"] or G.nodes[node]["ident"] == idDict["target"]:
             continue   
         
+        # 
         assert(i == idDict[node])
 
         # Trying out a new way of marking constraints, while also wrapping the data into the G object
         #curr_constraint = solver.Constraint(idDict[node],solver.infinity())
+        # Trying to figure out if line 228 and line 230 make any differences
         curr_constraint = solver.Constraint(i, solver.infinity())
+        
         constraints.append(curr_constraint)
         G.nodes[node]["constraint"] = curr_constraint
 
@@ -242,13 +246,15 @@ def prepare_constraints(solver, G, idDict):
 
     # Modified for depreciation of idDict
     constraints.append(solver.Constraint(idDict["source"], solver.infinity()))
+
+    # Testing if we should 
     
     # trying something silly
     # constraints.append(solver.Constraint(0.0, solver.infinity()))
 
-    for j,k in list(G.out_edges("S")):
+    for j,k in list(G.out_edges("source")):
         constraints[-1].SetCoefficient(G[j][k]["flow"],1)
-    for j,k in list(G.in_edges("T")):
+    for j,k in list(G.in_edges("target")):
         constraints[-1].SetCoefficient(G[j][k]["flow"],-1)
         
     constraints[-1].SetBounds(0,0)
@@ -285,19 +291,20 @@ def prepare_objective(solver, G, flows, gamma, s):
         
         log_weight = (math.log(G[i][j]["cost"])) * (-1)
         
-        if i == s:
+        if i == "source":
             log_weight = log_weight - gamma  
             print("adjusting for source")
         objective.SetCoefficient(flows[i,j], log_weight) 
     
     objective.SetMinimization()
-    
-    return objective  
-    
+        
     # Helpful debugging statement to show status of LP solver
-    # print('**'*25)
-    # print(solver.ExportModelAsLpFormat(False).replace('\\', '').replace(',_', ','), sep='\n')
-    # print('**'*25)
+    print('**'*25)
+    print(solver.ExportModelAsLpFormat(False).replace('\\', '').replace(',_', ','), sep='\n')
+    print('**'*25)
+
+    return objective  
+
 
 def responsenet(G, idDict, gamma, out_file):
     """ 
@@ -355,7 +362,7 @@ def write_output_to_tsv(status, G, solver, out_file, include_st = False):
         print(f"Objective value = {solver.Objective().Value():0.1f}")
         
         for u,v in G.edges:    
-            if G[u][v]["flow"].solution_value() > 0.0:   
+            if G[u][v]["flow"].solution_value() > 0.0 and G[u][v]["flow"].solution_value() < 1.0:   
                 #print(G[u][v]["flow"],'-->',G[u][v]["flow"].solution_value())
                 output_f.write(str(u)+"\t"+str(v)+"\t"+str(G[u][v]["flow"].solution_value())+"\n")
     return
