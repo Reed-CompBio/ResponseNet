@@ -221,9 +221,11 @@ def prepare_constraints(solver, G, idDict):
         if G.nodes[node]["ident"] == idDict["source"] or G.nodes[node]["ident"] == idDict["target"]:
             continue   
         
+        assert(i == idDict[node])
+
         # Trying out a new way of marking constraints, while also wrapping the data into the G object
-        curr_constraint = solver.Constraint(idDict[node],solver.infinity())
-        #curr_constraint = solver.Constraint(0.0, solver.infinity())
+        #curr_constraint = solver.Constraint(idDict[node],solver.infinity())
+        curr_constraint = solver.Constraint(i, solver.infinity())
         constraints.append(curr_constraint)
         G.nodes[node]["constraint"] = curr_constraint
 
@@ -242,7 +244,7 @@ def prepare_constraints(solver, G, idDict):
     constraints.append(solver.Constraint(idDict["source"], solver.infinity()))
     
     # trying something silly
-    # constraints.append(solver.Constraint(, solver.infinity()))
+    # constraints.append(solver.Constraint(0.0, solver.infinity()))
 
     for j,k in list(G.out_edges("S")):
         constraints[-1].SetCoefficient(G[j][k]["flow"],1)
