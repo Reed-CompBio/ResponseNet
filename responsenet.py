@@ -66,7 +66,7 @@ def construct_digraph(edges_file, default_capacity= 1):
         #       Do an error if all weights are 1
         #       NOTE: Check *should* be done, will test later
             w = float(tokens[2])
-            if w <= 1.0 and w >= 0.0:
+            if w <= 1.0 and w > 0.0:
                 weights.append(w)
                 if w == 1.0:
                     all_ones += 1
@@ -299,9 +299,9 @@ def prepare_objective(solver, G, flows, gamma, s):
     objective.SetMinimization()
         
     # Helpful debugging statement to show status of LP solver
-    print('**'*25)
-    print(solver.ExportModelAsLpFormat(False).replace('\\', '').replace(',_', ','), sep='\n')
-    print('**'*25)
+    # print('**'*25)
+    # print(solver.ExportModelAsLpFormat(False).replace('\\', '').replace(',_', ','), sep='\n')
+    # print('**'*25)
 
     return objective  
 
