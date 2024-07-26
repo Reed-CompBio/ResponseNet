@@ -42,7 +42,7 @@ def construct_digraph(edges_file, default_capacity= 1):
         mapped to an integer value for MCF
     """
     
-    #G = min_cost_flow.SimpleMinCostFlow()
+    ## Make a directed graph object.
     G = nx.DiGraph()
     
     # Go through edge_file, assign each node an id
@@ -57,16 +57,18 @@ def construct_digraph(edges_file, default_capacity= 1):
             if not node2 in G:
                 G.add_node(node2)
            
-            # Do an error if all weights are 1
             w = float(tokens[2])
-            # TODO: Add comment why we truncate 1.0 to 0.7
-            if w <= 1.0 and w > 0.0:
-                if w > 0.7:
-                    w = 0.7
+            # From the paper: truncate scores to be between 0 and 0.7. 
+            # "Because high edge weights could indicate unusually well-studied proteins or imperfectness 
+            # of the assumption of conditional independence, all weights were capped to a maximum value of 0.7"
+            if w > 0.7:
+                w = 0.7
             
-            else:
-                warnings.warn(f"Edge {tokens[0]} --> {tokens[1]} has weight greater than 1.0, this will cause problems")
+            # zero-weight or negative edges will cause a problem. 
+            if w <= 0.0:
+                warnings.warn(f"Edge {tokens[0]} --> {tokens[1]} has weight <= 0, this will cause problems")
 
+            ## AR change "cost" to "weight" so it accurately reflects the value. 
             G.add_edge(node1,
                         node2,
                         cost = w,
@@ -90,6 +92,8 @@ def add_sources_and_targets(G, sources, targets):
     Returns:
         @G : modified DiGraph object with faux source and target
     """
+
+    ## Divide the capacity evently across the sources and targets
     source_weight = 1/len(sources)
     target_weight = 1/len(targets)
     
@@ -256,7 +260,9 @@ def prepare_objective(solver, G, flows, gamma):
         objective.SetCoefficient(flows[i,j], log_weight) 
     
     objective.SetMinimization()
-        
+    
+    ## AR put this in a little utilty function so it's easy to call. It's OK if we never call it here.
+    ## REmove the other commented out code snippets (or replace it with commented out function call).
     # Helpful debugging statement to show status of LP solver
     # print('**'*25)
     # print(solver.ExportModelAsLpFormat(False).replace('\\', '').replace(',_', ','), sep='\n')
@@ -264,8 +270,8 @@ def prepare_objective(solver, G, flows, gamma):
 
     return objective  
 
-
-def responsenet(G, gamma, out_file):
+## AR make this return the solver, for testing.
+def responsenet(G, gamma, out_file, out_log):
     """ 
     The NEW ILP solver for ResponseNet, using GLOP.
 
@@ -302,9 +308,11 @@ def responsenet(G, gamma, out_file):
         print("The problem does not have an optimal solution.")
         return
     
-    write_output_to_tsv(status, G, solver, out_file)
-    
-def write_output_to_tsv(status, G, solver, out_file):
+    write_output_to_tsv(status, G, solver, out_file, out_log)
+    return solver
+
+## AR do you need to pass status here? 
+def write_output_to_tsv(status, G, solver, out_file, out_log):
     '''
     Write output of solver.Solve() over graph obj to an output file specified 
     by out_file
@@ -324,8 +332,11 @@ def write_output_to_tsv(status, G, solver, out_file):
                 if G[u][v]["flow"].solution_value() > 0.0 and G[u][v]["flow"].solution_value() <= 1.0:   
                     output_f.write(str(u)+"\t"+str(v)+"\t"+str(G[u][v]["flow"].solution_value())+"\n")
 
-    # Format for output log, including the entire solver information    
-    out_log = "output/logs" + out_file[6:-4] + ".log"
+    # Format for output log, including the entire solver information   
+    # AR: replaced hard-coded line with args.output 
+    # AR: out_file[6:-4] depends on the output file prefix, which be different - need to change that.
+    # AR: actually needed to move it out of here.
+    #out_log = args.output + out_file[6:-4] + ".log"
     if _output_log:
         with open(out_log, "w") as out_l:
             out_l.write("Objective value = " + str(solver.Objective().Value()) +'\n')
@@ -333,11 +344,11 @@ def write_output_to_tsv(status, G, solver, out_file):
             out_l.write("Solver:\n")
             out_l.write(str(solver.ExportModelAsLpFormat(False).replace('\\', '').replace(',_', ',')))
 
-        
-        for u,v in G.edges:    
-            if G[u][v]["flow"].solution_value() > 0.0:   
-                print(G[u][v]["flow"],'-->',G[u][v]["flow"].solution_value())
-                output_f.write(str(u)+"\t"+str(v)+"\t"+str(G[u][v]["flow"].solution_value())+"\n")
+        ## AR: I commented this out. I don't think it needs to be here?
+        #for u,v in G.edges:    
+        #    if G[u][v]["flow"].solution_value() > 0.0:   
+        #        print(G[u][v]["flow"],'-->',G[u][v]["flow"].solution_value())
+        #        output_f.write(str(u)+"\t"+str(v)+"\t"+str(G[u][v]["flow"].solution_value())+"\n")
     return
 
 def main(args):
@@ -360,9 +371,10 @@ def main(args):
     
     G = add_sources_and_targets(G, sources, targets)
     
+    # AR make this a TXT file. Keep the same formatting. Should we have headers
     out_file = args.output+"_gamma"+str(gamma)+".tsv"
-
-    responsenet(G, gamma, out_file)
+    out_log = args.output + out_file[6:-4] + ".log"
+    responsenet(G, gamma, out_file, out_log)
     
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -385,12 +397,12 @@ if __name__ == "__main__":
                         type=str,
                         required=True)
     parser.add_argument('--gamma',
-                        help='The size of the output graph. Default = 10',
+                        help='The size of the output graph. Default = 10.',
                         type=int,
                         required=False,
                         default=10)
     parser.add_argument('-st','--include_st',
-                        help='Determines whether output should include artificial Source and Target nodes',
+                        help='Determines whether output should include artificial Source and Target nodes. By default does not include them.',
                         action='store_true')
     parser.add_argument('-v','--verbose',
                         help='Include verbose console output',
@@ -400,4 +412,7 @@ if __name__ == "__main__":
                         action='store_true')
 
     args = parser.parse_args()
-main(args)
+    print(args)
+## AR indent this so main() is called within the if __name__ == "__main__" clause. 
+## I've also written a separate parse_args() function that's called first thing in main().
+    main(args)

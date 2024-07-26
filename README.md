@@ -5,6 +5,7 @@ Implementation of the ResponseNet algorithm. The algorithm can be found in this 
 
 This method has appeared in various webservers (most recently as [ResponseNet v3](https://pubmed.ncbi.nlm.nih.gov/31114913/)), but the underlying algorithm is not publicly available. 
 
+### Usage 
 ```
 usage: responsenet.py [-h] --edges_file EDGES_FILE --sources_file SOURCES_FILE --targets_file TARGETS_FILE --output OUTPUT
                       [--gamma GAMMA] [-st] [-v] [-o]
@@ -23,6 +24,8 @@ options:
   -v, --verbose         Include verbose console output
   -o, --output_log      Create output log
   ```
+
+### Quick Start
 
 
 Some notes:
