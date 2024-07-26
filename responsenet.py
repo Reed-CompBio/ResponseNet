@@ -59,7 +59,7 @@ def construct_digraph(edges_file, default_capacity= 1):
            
             w = float(tokens[2])
             # From the paper: truncate scores to be between 0 and 0.7. 
-            # "Because high edge weights could indicate unusually well-studied proteins or imperfectness 
+            # Because high edge weights could indicate unusually well-studied proteins or imperfectness 
             # of the assumption of conditional independence, all weights were capped to a maximum value of 0.7"
             if w > 0.7:
                 w = 0.7
@@ -93,7 +93,7 @@ def add_sources_and_targets(G, sources, targets):
         @G : modified DiGraph object with faux source and target
     """
 
-    ## Divide the capacity evently across the sources and targets
+    # Divide the capacity evently across the sources and targets
     source_weight = 1/len(sources)
     target_weight = 1/len(targets)
     
@@ -156,7 +156,6 @@ def prepare_variables(solver, G):
         edge = (i,j)
         if edge not in flows:
             # Need to set max value for each edge to be the max capacity of given edge
-            # Seeing how this changes things (it does)
             flows[edge] = solver.NumVar(0.0, G[i][j]["cap"], f"Flows{edge}")
             G.get_edge_data(edge[0],edge[1])["flow"] = flows[edge]
         else:
@@ -168,9 +167,7 @@ def prepare_variables(solver, G):
         print(f"We had {extras} repeat edges")
 
     # Helpful debugging statement for LP solver    
-    # print('**'*25)
-    # print(solver.ExportModelAsLpFormat(False).replace('\\', '').replace(',_', ','), sep='\n')
-    # print('**'*25)
+    # print_solver(solver)
     
     return flows
     
@@ -224,10 +221,8 @@ def prepare_constraints(solver, G):
         constraints[-1].SetCoefficient(G[j][k]["flow"],-1)
         
     # Helpful debugging statement for LP    
-    # print('**'*25)
-    # print(solver.ExportModelAsLpFormat(False).replace('\\', '').replace(',_', ','), sep='\n')
-    # print('**'*25)
-    
+    # print_solver(solver)
+
     return constraints
             
 def prepare_objective(solver, G, flows, gamma):
@@ -261,14 +256,19 @@ def prepare_objective(solver, G, flows, gamma):
     
     objective.SetMinimization()
     
-    ## AR put this in a little utilty function so it's easy to call. It's OK if we never call it here.
-    ## REmove the other commented out code snippets (or replace it with commented out function call).
     # Helpful debugging statement to show status of LP solver
-    # print('**'*25)
-    # print(solver.ExportModelAsLpFormat(False).replace('\\', '').replace(',_', ','), sep='\n')
-    # print('**'*25)
+    # print_solver(solver)
 
     return objective  
+
+def print_solver(solver):
+    """
+    Helper function to print contents of solver (constraints, variables, objective) for debugging
+    """
+
+    print('**'*25)
+    print(solver.ExportModelAsLpFormat(False).replace('\\', '').replace(',_', ','), sep='\n')
+    print('**'*25)
 
 ## AR make this return the solver, for testing.
 def responsenet(G, gamma, out_file, out_log):
@@ -290,9 +290,7 @@ def responsenet(G, gamma, out_file, out_log):
     solver = pywraplp.Solver.CreateSolver("GLOP")
     if not solver:
         return
-    
-    s = "source"
-    
+        
     # Data structures that define the ILP, kept for your debugging pleasure
     flows = prepare_variables(solver, G)
     constraints = prepare_constraints(solver, G)
@@ -308,17 +306,19 @@ def responsenet(G, gamma, out_file, out_log):
         print("The problem does not have an optimal solution.")
         return
     
-    write_output_to_tsv(status, G, solver, out_file, out_log)
+    write_output_to_tsv(G, solver, out_file, out_log)
     return solver
 
-## AR do you need to pass status here? 
-def write_output_to_tsv(status, G, solver, out_file, out_log):
+def write_output_to_tsv(G, solver, out_file, out_log):
     '''
     Write output of solver.Solve() over graph obj to an output file specified 
     by out_file
     
     Params:
-        @status: status of solver.Solve()
+        @G : graph object
+        @solver : pywraplp.Solver() object, contains the answer to the LP
+        @out_file : str of output file name/path
+        @out_log : str of output log file name/path
     '''
     with open(out_file, "w") as output_f:
         print(f"Objective value = {solver.Objective().Value():0.1f}")
@@ -332,11 +332,7 @@ def write_output_to_tsv(status, G, solver, out_file, out_log):
                 if G[u][v]["flow"].solution_value() > 0.0 and G[u][v]["flow"].solution_value() <= 1.0:   
                     output_f.write(str(u)+"\t"+str(v)+"\t"+str(G[u][v]["flow"].solution_value())+"\n")
 
-    # Format for output log, including the entire solver information   
-    # AR: replaced hard-coded line with args.output 
-    # AR: out_file[6:-4] depends on the output file prefix, which be different - need to change that.
-    # AR: actually needed to move it out of here.
-    #out_log = args.output + out_file[6:-4] + ".log"
+    # Format for output log, including the entire solver information
     if _output_log:
         with open(out_log, "w") as out_l:
             out_l.write("Objective value = " + str(solver.Objective().Value()) +'\n')
@@ -344,12 +340,7 @@ def write_output_to_tsv(status, G, solver, out_file, out_log):
             out_l.write("Solver:\n")
             out_l.write(str(solver.ExportModelAsLpFormat(False).replace('\\', '').replace(',_', ',')))
 
-        ## AR: I commented this out. I don't think it needs to be here?
-        #for u,v in G.edges:    
-        #    if G[u][v]["flow"].solution_value() > 0.0:   
-        #        print(G[u][v]["flow"],'-->',G[u][v]["flow"].solution_value())
-        #        output_f.write(str(u)+"\t"+str(v)+"\t"+str(G[u][v]["flow"].solution_value())+"\n")
-    return
+        return
 
 def main(args):
     
@@ -358,6 +349,7 @@ def main(args):
     sources = parse_nodes(args.sources_file)
     targets = parse_nodes(args.targets_file)
     
+    # Modifying global variables based on args
     global _verbose 
     global _include_st 
     global _output_log
@@ -372,8 +364,8 @@ def main(args):
     G = add_sources_and_targets(G, sources, targets)
     
     # AR make this a TXT file. Keep the same formatting. Should we have headers
-    out_file = args.output+"_gamma"+str(gamma)+".tsv"
-    out_log = args.output + out_file[6:-4] + ".log"
+    out_file = args.output+"_gamma"+str(gamma)+".txt"
+    out_log = args.output +"_gamma"+str(gamma) + ".log"
     responsenet(G, gamma, out_file, out_log)
     
 if __name__ == "__main__":
@@ -413,6 +405,5 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     print(args)
-## AR indent this so main() is called within the if __name__ == "__main__" clause. 
-## I've also written a separate parse_args() function that's called first thing in main().
+
     main(args)
