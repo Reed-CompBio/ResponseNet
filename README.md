@@ -27,7 +27,27 @@ options:
 
 ### Quick Start
 
+We have provided a small example of a directed weighted graph, with a source `A` and a target `E`:
 
-Some notes:
+![JPEG image-4B8D-A0E6-92-0](https://github.com/user-attachments/assets/51260387-bf38-4659-9577-ff1484937af0)
+
+You can run the example with the command:
+
+```
+python responsenet.py --edges_file data/inputs/test-edges.txt --sources_file data/inputs/test-sources.txt --targets_file data/inputs/test-targets.txt --output out -v -o
+```
+
+This will output the final file of edges with non-zero flow as well as a log file (`-o`) with the LP. It will also output some information to the console (`-v`). The ouput edges file will look like
+
+```
+A	B	1.0
+B	E	1.0
+```
+
+Which corresponds to these edges in the graph:
+
+![IMG_F2C39098471A-1](https://github.com/user-attachments/assets/16fa0904-c048-4b68-a429-f4b7df498f26)
+
+### Some notes:
 - Edge weights are positive are should range between 0 and 1. Similar to the paper, edge weights greater than 0.7 are truncated to 0.7.
 - The gamma variable determines the size of the network. The default setting is 10, same as the paper.
