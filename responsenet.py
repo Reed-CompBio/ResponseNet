@@ -323,6 +323,8 @@ def write_output_to_tsv(G, solver, out_file, out_log):
     with open(out_file, "w") as output_f:
         print(f"Objective value = {solver.Objective().Value():0.1f}")
         print(f"Solved in {(float(solver.wall_time())/1000)} seconds")
+        
+        output_f.write("Interactor 1" + '\t' + "Interactor 2" + '\t' + "Flow")
         for u,v in G.edges:
 
             # Check to see if we want to actually include the artificial source and target  
