@@ -1,2 +1,1 @@
-ortools
-networkx
+networkx==3.3
