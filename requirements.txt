@@ -1,2 +1,2 @@
-ortools==9.10
-networkx==3.3
+ortools
+networkx
