@@ -30,7 +30,7 @@ def parse_nodes(node_file):
 def construct_digraph(edges_file, default_capacity= 1):
     """
     Similar to MinCostFlow, we need to parse a list of undirected edges and 
-    returns a graph object and idDict
+    returns a graph object
     
     Parameters:
         @edges_file : PATH()
@@ -38,8 +38,6 @@ def construct_digraph(edges_file, default_capacity= 1):
     
     Returns:
         @G: graph object
-        @idDict: Dictionary of all nodes in interactome, 
-        mapped to an integer value for MCF
     """
     
     ## Make a directed graph object.
@@ -324,7 +322,7 @@ def write_output_to_tsv(G, solver, out_file, out_log):
         print(f"Objective value = {solver.Objective().Value():0.1f}")
         print(f"Solved in {(float(solver.wall_time())/1000)} seconds")
         
-        output_f.write("Interactor 1" + '\t' + "Interactor 2" + '\t' + "Flow")
+        output_f.write("Interactor 1" + '\t' + "Interactor 2" + '\t' + "Flow" + '\n')
         for u,v in G.edges:
 
             # Check to see if we want to actually include the artificial source and target  

@@ -28,6 +28,13 @@ solver = rn.responsenet(G, gamma, out_file, out_log)
 ## also add test_lp() that counts the number of constraints
 ## optionally, add test functions that confirm that the sources/targest are being added appropriately.
 
+#TODO: Add tests for constraints and objective and variables for LP
+def test_constraints():
+    assert solver.NumConstraints() == 6
+
+def test_variables():
+    assert solver.NumVar() == 11
+
 def test_objective():
     assert round(solver.Objective().Value(),4) == -8.5729
 
