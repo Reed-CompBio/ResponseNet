@@ -1,0 +1,15 @@
+[project]
+name = "responsenet"
+version = "0.1.0"
+description = " Implementation of the ResponseNet algorithm"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "networkx>=3.5",
+    "ortools>=9.13.4784",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.0",
+]
