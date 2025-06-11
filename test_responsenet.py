@@ -1,12 +1,12 @@
-import pytest
 import argparse
+from pathlib import Path
 import responsenet as rn
 
 args = argparse.Namespace(edges_file='data/inputs/test-edges.txt', sources_file='data/inputs/test-sources.txt', targets_file='data/inputs/test-targets.txt', output='test-out', gamma=10, include_st=False, verbose=True, output_log=True)
 
 ## functions from main(). There has to be a better way to do this.
-sources = rn.parse_nodes(args.sources_file)
-targets = rn.parse_nodes(args.targets_file)
+sources = rn.parse_nodes(Path(args.sources_file))
+targets = rn.parse_nodes(Path(args.targets_file))
 
 global _verbose 
 global _include_st 
@@ -23,17 +23,17 @@ G = rn.add_sources_and_targets(G, sources, targets)
 out_file = args.output+"_gamma"+str(gamma)+".tsv"
 out_log = args.output + out_file[6:-4] + ".log"
 
-solver = rn.responsenet(G, gamma, out_file, out_log)
+solver = rn.responsenet(G, gamma, Path(out_file), Path(out_log))
 
 ## also add test_lp() that counts the number of constraints
 ## optionally, add test functions that confirm that the sources/targest are being added appropriately.
 
-#TODO: Add tests for constraints and objective and variables for LP
+# TODO: Add tests for constraints and objective and variables for LP
 def test_constraints():
     assert solver.NumConstraints() == 6
 
 def test_variables():
-    assert solver.NumVar() == 11
+    assert solver.NumVariables() == 11
 
 def test_objective():
     assert round(solver.Objective().Value(),4) == -8.5729

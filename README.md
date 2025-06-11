@@ -5,7 +5,7 @@ Implementation of the ResponseNet algorithm. The algorithm can be found in this 
 
 This method has appeared in various webservers (most recently as [ResponseNet v3](https://pubmed.ncbi.nlm.nih.gov/31114913/)), but the underlying algorithm is not publicly available. 
 
-### Usage 
+## Usage 
 ```
 usage: responsenet.py [-h] --edges_file EDGES_FILE --sources_file SOURCES_FILE --targets_file TARGETS_FILE --output OUTPUT
                       [--gamma GAMMA] [-st] [-v] [-o]
@@ -25,7 +25,7 @@ options:
   -o, --output_log      Create output log
   ```
 
-### Quick Start
+## Quick Start
 
 We have provided a small example of a directed weighted graph, with a source `A` and a target `E`:
 
@@ -48,6 +48,6 @@ Which corresponds to these edges in the graph:
 
 ![IMG_F2C39098471A-1](https://github.com/user-attachments/assets/16fa0904-c048-4b68-a429-f4b7df498f26)
 
-### Some notes:
+## Notes
 - Edge weights are positive are should range between 0 and 1. Similar to the paper, edge weights greater than 0.7 are truncated to 0.7.
 - The gamma variable determines the size of the network. The default setting is 10, same as the paper.

@@ -1,43 +1,52 @@
-# The beginning of the rewrite of responsenet
+# ResponseNet approaches pathway reconstruction by modelling the problem as a minimum-cost flow optimization problem.
+# However, unlike other ways of modelling this (e.g. PCSTs), ResponseNet optimizes flow by encoding the entire graph
+# as an ILP problem.
+#
+# The algorithm for ResponseNet implemented below is described in the _Linear programming formulation_ section of the
+# paper linked in `README.md`.
+# 
+# The genetic hits are the sources, and the differentially expressed genes are the targets. These node sets are
+# associated with a weighed interactome, or a weighed, directed graph.
 
-from ortools.linear_solver import pywraplp
 import argparse
-import networkx as nx
+import logging
 import math
+import networkx as nx
+from ortools.linear_solver import pywraplp
+from pathlib import Path
 import warnings
 
 # Global Variables that args can modify
-_verbose = False
 _include_st = False
 _output_log = False
 
-def parse_nodes(node_file):
+def as_cost(weight: float) -> float:
+    # We get the negated log of the weight as our cost: weight is from (0, 1] (truncated to 0.7)
+    # where greater values are edges we want to keep in the interactome. This reframes
+    # the 'weight maximization' game into a 'cost minimization' game. -log(...) will transform our weights
+    # where lower is higher and higher is lower.
+    return math.log(weight) * -1
+
+def parse_nodes(node_file: Path):
     """ 
     Parse a list of sources or targets and return a set 
     
-    Parameters:
-        @node_file : PATH()
-            the PATH file for a list of nodes
-
-    Returns:
-        @nodes: set of all nodes listed in file
+    @param node_file: the PATH file for a list of nodes
+    @return: set of all nodes listed in file
     """
-    with open(node_file) as node_f:
-        lines = node_f.readlines()
-        nodes = set(map(str.strip, lines))
+    lines = node_file.read_text().splitlines()
+    nodes = set(map(str.strip, lines))
     return nodes
 
-def construct_digraph(edges_file, default_capacity= 1):
+def construct_digraph(edges_file: Path, default_capacity=1):
     """
     Similar to MinCostFlow, we need to parse a list of undirected edges and 
     returns a graph object
     
-    Parameters:
-        @edges_file : PATH()
-            the PATH file for an interactome
+    @param edges_file: the PATH file for an interactome
+    @param default_capacity: the capacity (c_(ij)) to give to all of the edges initially.
     
-    Returns:
-        @G: graph object
+    @return: the constructed graph object
     """
     
     ## Make a directed graph object.
@@ -46,260 +55,243 @@ def construct_digraph(edges_file, default_capacity= 1):
     # Go through edge_file, assign each node an id
     with open(edges_file) as edges_f:
         for line in edges_f:
-            tokens = line.strip().split()
-            node1 = tokens[0]
+            tokens = line.strip().split('\t')
+            if len(tokens) != 3:
+                raise ValueError(f"Provided line {line} does not have 3 tab-separated entries.")
+            source, target, weight = tokens
             
-            if not node1 in G:
-                G.add_node(node1)
-            node2 = tokens[1]
-            if not node2 in G:
-                G.add_node(node2)
+            if not source in G:
+                G.add_node(source)
+            if not target in G:
+                G.add_node(target)
            
-            w = float(tokens[2])
-            # From the paper: truncate scores to be between 0 and 0.7. 
-            # Because high edge weights could indicate unusually well-studied proteins or imperfectness 
-            # of the assumption of conditional independence, all weights were capped to a maximum value of 0.7"
-            if w > 0.7:
-                w = 0.7
+            weight = float(weight)
+            # As described in the paper (at "Weighting scheme for interactome edges"),
+            # we truncate scores to be between 0 and 0.7: 
+            #     "Because high edge weights could indicate unusually well-studied proteins or imperfectness 
+            #     of the assumption of conditional independence, all weights were capped to a maximum value of 0.7"
+            if weight > 0.7:
+                weight = 0.7
             
-            # zero-weight or negative edges will cause a problem. 
-            if w <= 0.0:
-                warnings.warn(f"Edge {tokens[0]} --> {tokens[1]} has weight <= 0, this will cause problems")
+            # Zero-weight or negative edges cause problems - note that we will take the negated log of the weight later.
+            # TODO: can we do anything about zero-weight edges?
+            if weight <= 0.0:
+                warnings.warn(f"Edge {source} --> {target} has weight <= 0 ({weight}), this will cause problems.")
+            
+            cost = as_cost(weight)
 
             ## AR change "cost" to "weight" so it accurately reflects the value. 
-            G.add_edge(node1,
-                        node2,
-                        cost = w,
-                        cap = default_capacity)
+            G.add_edge(source,
+                        target,
+                        cost=cost,
+                        cap=default_capacity)
 
-        return G
+    return G
     
-def add_sources_and_targets(G, sources, targets):
+def add_sources_and_targets(G: nx.DiGraph, sources: set[str], targets: set[str]) -> nx.DiGraph:
     """
-    Add a false source and target node to the DiGraph, helpful
-    for organization and essential to the ILP
+    Add a 'false' super source and target node to the DiGraph, helpful
+    for organization and essential to the ILP.
 
-    Parameters:
-        @G : nx.DiGraph()
-            DiGraph object
-        @sources : set()
-            set of all source nodes
-        @targets : set()
-            set of all target nodes
+    @param G: DiGraph object
+    @param sources: set of all source nodes
+    @param targets: set of all target nodes
         
-    Returns:
-        @G : modified DiGraph object with faux source and target
+    @return: modified DiGraph object with faux source and target
     """
 
-    # Divide the capacity evently across the sources and targets
-    source_weight = 1/len(sources)
-    target_weight = 1/len(targets)
+    # Divide the capacity evently across the sources and targets.
+    source_weight = 1 / len(sources)
+    target_weight = 1 / len(targets)
     
     source_cap = source_weight
     target_cap = target_weight
+
+    source_cost = as_cost(source_weight)
+    target_cost = as_cost(target_weight)
+
+    if G.has_node("source"):
+        raise ValueError("A node named 'source' is already present - ResponseNet can't add a super-source node.")
+    if G.has_node("target"):
+        raise ValueError("A node named 'target' is already present - ResponseNet can't add a super-target node.")
     
     G.add_node("source")
     G.add_node("target")
 
     for source in sources:
-        if _verbose:
-            print(source)
+        logging.debug(f'Looping through source: {source}')
         if source in G:
-            if _verbose:
-                print("source found")
             G.add_edge("source",
                         source,
-                        cost = source_weight,
-                        cap = source_cap)
-
+                        cost=source_cost,
+                        cap=source_cap)
         else:
-            if _verbose:
-                print(f"Source: {source} not found in graph")
+            warnings.warn(f"Source '{source}' not found in graph")
 
     for target in targets:
-        
-        if _verbose:
-            print(target)
+        logging.debug(f'Looping through target: {target}')
         if target in G:
-            if _verbose:
-                print("target found")
             G.add_edge(target,
                         "target",
-                        cost = target_weight,
-                        cap = target_cap)
-
+                        cost=target_cost,
+                        cap=target_cap)
         else:
-            if _verbose:
-                print(f"Target: {target} not found in graph")   
+            warnings.warn(f"Target '{target}' not found in graph")   
             
     return G
     
-def prepare_variables(solver, G):
+def prepare_variables(solver: pywraplp.Solver, G: nx.DiGraph) -> dict[tuple, pywraplp.Variable]:
     """
     This section systematically creates variables for the ILP and saves them
     both in a dictionary and as an attribute for each edge in G
 
-    Parameters:
-        @solver : pywraplp.Solver()
-            solver object that the LP depends on
-        @G : nx.DiGraph()
-            graph object of interactome
+    @param solver: solver object that the LP depends on
+    @param G: graph object of interactome
         
-    Returns:
-        @flows: dictionary of all variables in the solver
+    @returns flows: dictionary of all variables in the solver
     """
-    flows = dict()
+
+    # Here, we want to construct all of the flow variables for the ILP.
+    # We take all of the present "cap" values per edge (see `construct_digraph`)
+    # and add them to the ILP to be optimized.
+    # This adds the c_(ij) step present in the paper,
+    # but makes them flexible variables who can be between 0 and cap.
+    flows: dict[tuple, pywraplp.Variable] = dict()
     extras = 0
-    for i,j in G.edges():
+    for i, j in G.edges():
         edge = (i,j)
         if edge not in flows:
-            # Need to set max value for each edge to be the max capacity of given edge
             flows[edge] = solver.NumVar(0.0, G[i][j]["cap"], f"Flows{edge}")
-            G.get_edge_data(edge[0],edge[1])["flow"] = flows[edge]
+            G.get_edge_data(i, j)["flow"] = flows[edge]
         else:
-            if _verbose:
-                print("repeat")
-                print(edge)
+            logging.info("Found repeating edge: {edge}")
             extras += 1
-    if _verbose:
-        print(f"We had {extras} repeat edges")
+    logging.info(f"There were {extras} repeat edges.")
 
-    # Helpful debugging statement for LP solver    
-    # print_solver(solver)
+    # [On debug mode] log the status of the solver
+    debug_log_solver(solver)
     
     return flows
     
-def prepare_constraints(solver, G):
+def prepare_constraints(solver: pywraplp.Solver, G: nx.DiGraph) -> list[pywraplp.Constraint]:
     """
     This section systematically applies constraints on each node and all edges
     to make sure that any flow entering a node also exits a node
 
-    Parameters:
-        @solver : pywraplp.Solver()
-            solver object that LP depends on
-        @G : nx.DiGraph()
-            graph object of interactome
-        @idDict : dict()
-            dictionary of all nodes in network
+    @param solver: solver object that LP depends on
+    @param G: graph object of interactome
 
-    Returns:
-        @constraints: list object containing all constraints in the LP
+    @return constraints: list object containing all constraints in the LP
     """
-    constraints = []
-    for i,  node in enumerate(G.nodes):
-        
-        in_edges = list(G.in_edges(node))
-        out_edges = list(G.out_edges(node))
-        
+
+    constraints: list[pywraplp.Constraint] = []
+    for i, node in enumerate(G.nodes):
         if node == "source" or node == "target":
-            continue   
-        
-        # Creating constraint for each node, constraint has bounds 0,0 
-        # and is named after the node
+            continue
+
+        # Creating constraint for each node, named after the node.
+        # We establish that the node must be constrained to the value zero, as to
+        # say that all of the coefficients attached to the constraint must add up to zero.
         curr_constraint = solver.Constraint(0.0, 0.0, node)
         
         constraints.append(curr_constraint)
         G.nodes[node]["constraint"] = curr_constraint
 
+        in_edges = G.in_edges(node)
+        out_edges = G.out_edges(node)
+
+        # Since the node must have a final value of zero,
+        # we add 1 and -1 coefficients to the incoming and outgoing edges, respectively,
+        # to say that, as the top-level docstring implies, all flow entering this node
+        # also exits it.
         for u,v in in_edges:
             assert v == node
-            constraints[i].SetCoefficient(G[u][v]["flow"],1)
+            constraints[i].SetCoefficient(G[u][v]["flow"], 1)
             
         for u,v in out_edges:
             assert u == node
-            constraints[i].SetCoefficient(G[u][v]["flow"],-1)
+            constraints[i].SetCoefficient(G[u][v]["flow"], -1)
 
     # Adding a final constraint to make sure all flows going from the source
-    # and to the target are equivalent
+    # and to the target are equivalent. The same idea for this constraint
+    # is present in the above for-loop.
     constraints.append(solver.Constraint(0.0, 0.0, "source"))
 
-    for j,k in list(G.out_edges("source")):
-        constraints[-1].SetCoefficient(G[j][k]["flow"],1)
-    for j,k in list(G.in_edges("target")):
-        constraints[-1].SetCoefficient(G[j][k]["flow"],-1)
+    for j, k in G.out_edges("source"):
+        constraints[-1].SetCoefficient(G[j][k]["flow"], 1)
+    for j, k in G.in_edges("target"):
+        constraints[-1].SetCoefficient(G[j][k]["flow"], -1)
         
-    # Helpful debugging statement for LP    
-    # print_solver(solver)
+    # [On debug mode] log the status of the solver
+    debug_log_solver(solver)
 
     return constraints
             
-def prepare_objective(solver, G, flows, gamma):
+def prepare_objective(solver: pywraplp.Solver, G: nx.DiGraph, flows: dict, gamma: int) -> pywraplp.Objective:
     """
     This segment goes through all edges in the graph and sets a coefficient on each variable in the LP
 
-    Parameters:
-        @solver : pywraplp.Solver()
-            solver object that LP depends on
-        @G : nx.DiGraph()
-            graph object of interactome
-        @flows : dict()
-            dictionary of all flow variables for the solver
-        @gamma : int()
-            user defined value that determines graph size
+    @param solver: solver object that LP depends on
+    @param G: graph object of interactome
+    @param flows: dictionary of all flow variables for the solver
+    @param gamma: user defined value that determines graph size
     
-    Returns:
-        @objective : solver objective with all constraints
+    @returns objective: solver objective with all constraints
     """
-    objective = solver.Objective()
+    objective: pywraplp.Objective = solver.Objective()
     
+    # The general goal of this objective is to minimize
+    # the cost of all of the edges.
     for i,j in G.edges():
-        
-        log_weight = (math.log(G[i][j]["cost"])) * (-1)
-        
+        # We want to minimize our costs (see `as_cost` for how weights are processed into costs)
+        cost = G[i][j]["cost"] 
         if i == "source":
-            log_weight = log_weight - gamma  
-            if _verbose:
-                print("adjusting for source")
-        objective.SetCoefficient(flows[i,j], log_weight) 
+            # The higher gamma is, the more flow that is allowed to transfer through the network,
+            # as this subtraction rewards any flow that travels from the super-source through the
+            # rest of the network.
+            cost = cost - gamma
+        objective.SetCoefficient(flows[i,j], cost)
     
     objective.SetMinimization()
     
-    # Helpful debugging statement to show status of LP solver
-    # print_solver(solver)
+    # [On debug mode] log the status of the solver
+    debug_log_solver(solver)
 
     return objective  
 
-def print_solver(solver):
+def debug_log_solver(solver):
     """
     Helper function to print contents of solver (constraints, variables, objective) for debugging
     """
 
-    print('**'*25)
-    print(solver.ExportModelAsLpFormat(False).replace('\\', '').replace(',_', ','), sep='\n')
-    print('**'*25)
+    logging.debug('**' * 25)
+    logging.debug(solver.ExportModelAsLpFormat(False).replace('\\', '').replace(',_', ','))
+    logging.debug('**' * 25)
 
 ## AR make this return the solver, for testing.
-def responsenet(G, gamma, out_file, out_log):
+def responsenet(G: nx.DiGraph, gamma: int, out_file: Path, out_log: Path) -> pywraplp.Solver:
     """ 
     The NEW ILP solver for ResponseNet, using GLOP.
 
-    Parameters:
-        @G : nx.DiGraph()
-            graph object of interactome
-        @gamma : int()
-            user defined integer determining size of output graph
-        @out_file : PATH()
-            PATH to the output file for writing the LP solution
-    
-    Returns:
-        Nothing
+    @param G: graph object of interactome
+    @param gamma: user defined integer determining size of output graph
+    @param out_file: path to the output file for writing the LP solution
     """
     
-    solver = pywraplp.Solver.CreateSolver("GLOP")
+    solver: pywraplp.Solver = pywraplp.Solver.CreateSolver("GLOP")
     if not solver:
         return
         
     # Data structures that define the ILP, kept for your debugging pleasure
     flows = prepare_variables(solver, G)
-    constraints = prepare_constraints(solver, G)
-    objective = prepare_objective(solver, G, flows, gamma)
+    _constraints = prepare_constraints(solver, G)
+    _objective = prepare_objective(solver, G, flows, gamma)
     
     print("Attempting solve of flows...")
     status = solver.Solve()
     
     if status == pywraplp.Solver.OPTIMAL:
         print("Solved! \n")
-
     else:
         print("The problem does not have an optimal solution.")
         return
@@ -307,24 +299,22 @@ def responsenet(G, gamma, out_file, out_log):
     write_output_to_tsv(G, solver, out_file, out_log)
     return solver
 
-def write_output_to_tsv(G, solver, out_file, out_log):
+def write_output_to_tsv(G: nx.digraph, solver: pywraplp.Solver, out_file: Path, out_log: Path):
     '''
     Write output of solver.Solve() over graph obj to an output file specified 
     by out_file
     
-    Params:
-        @G : graph object
-        @solver : pywraplp.Solver() object, contains the answer to the LP
-        @out_file : str of output file name/path
-        @out_log : str of output log file name/path
+    @G : graph object
+    @solver: contains the answer to the LP
+    @out_file: Path to output file
+    @out_log: Path to output log
     '''
-    with open(out_file, "w") as output_f:
+    with out_file.open("w") as output_f:
         print(f"Objective value = {solver.Objective().Value():0.1f}")
         print(f"Solved in {(float(solver.wall_time())/1000)} seconds")
         
         output_f.write("Interactor 1" + '\t' + "Interactor 2" + '\t' + "Flow" + "\n")
         for u,v in G.edges:
-
             # Check to see if we want to actually include the artificial source and target  
             if (u == "source" or v == "target") and not _include_st:
                 continue
@@ -334,28 +324,26 @@ def write_output_to_tsv(G, solver, out_file, out_log):
 
     # Format for output log, including the entire solver information
     if _output_log:
-        with open(out_log, "w") as out_l:
-            out_l.write("Objective value = " + str(solver.Objective().Value()) +'\n')
-            out_l.write("Solved in " + str(float(solver.wall_time())/1000) + " seconds"+'\n\n')
+        with out_log.open("w") as out_l:
+            out_l.write("Objective value = " + str(solver.Objective().Value()) + '\n')
+            out_l.write("Solved in " + str(float(solver.wall_time()) / 1000) + " seconds" + '\n\n')
             out_l.write("Solver:\n")
             out_l.write(str(solver.ExportModelAsLpFormat(False).replace('\\', '').replace(',_', ',')))
 
-        return
-
 def main(args):
-    
     print("Running ResponseNet...")
 
-    sources = parse_nodes(args.sources_file)
-    targets = parse_nodes(args.targets_file)
+    sources = parse_nodes(Path(args.sources_file))
+    targets = parse_nodes(Path(args.targets_file))
     
     # Modifying global variables based on args
-    global _verbose 
     global _include_st 
     global _output_log
-    _verbose = args.verbose
     _include_st = args.include_st
     _output_log = args.output_log
+
+    if args.verbose:
+        logging.basicConfig(level=logging.DEBUG)
 
     gamma = args.gamma
     
@@ -364,9 +352,9 @@ def main(args):
     G = add_sources_and_targets(G, sources, targets)
     
     # AR make this a TXT file. Keep the same formatting. Should we have headers
-    out_file = args.output+"_gamma"+str(gamma)+".txt"
-    out_log = args.output +"_gamma"+str(gamma) + ".log"
-    responsenet(G, gamma, out_file, out_log)
+    out_file = args.output + "_gamma" + str(gamma) + ".txt"
+    out_log = args.output  + "_gamma" + str(gamma) + ".log"
+    responsenet(G, gamma, Path(out_file), Path(out_log))
     
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

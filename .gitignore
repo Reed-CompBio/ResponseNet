@@ -176,3 +176,4 @@ uv.lock
 
 # Output artifacts
 *.tsv
+out_gamma*
