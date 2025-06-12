@@ -280,7 +280,7 @@ def responsenet(G: nx.DiGraph, gamma: int, out_file: Path, out_log: Path) -> pyw
     
     solver: pywraplp.Solver = pywraplp.Solver.CreateSolver("GLOP")
     if not solver:
-        return
+        raise RuntimeError("Could not construct GLOP solver.")
         
     # Data structures that define the ILP, kept for your debugging pleasure
     flows = prepare_variables(solver, G)
@@ -293,13 +293,12 @@ def responsenet(G: nx.DiGraph, gamma: int, out_file: Path, out_log: Path) -> pyw
     if status == pywraplp.Solver.OPTIMAL:
         print("Solved! \n")
     else:
-        print("The problem does not have an optimal solution.")
-        return
+        raise RuntimeError("The problem does not have an optimal solution.")
     
     write_output_to_tsv(G, solver, out_file, out_log)
     return solver
 
-def write_output_to_tsv(G: nx.digraph, solver: pywraplp.Solver, out_file: Path, out_log: Path):
+def write_output_to_tsv(G: nx.DiGraph, solver: pywraplp.Solver, out_file: Path, out_log: Path):
     '''
     Write output of solver.Solve() over graph obj to an output file specified 
     by out_file
